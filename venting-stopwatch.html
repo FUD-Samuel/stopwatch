@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Venting Stopwatch · FUTUREWAY</title>
+<style>
+  :root {
+    --bg: #0b0f16;
+    --panel: #121822;
+    --line: #232c3a;
+    --text: #eef2f7;
+    --muted: #8793a6;
+    --teal: #2fb8a6;
+    --amber: #f2a33a;
+    --red: #ec5a47;
+    --alu: #cfd8e3;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(ellipse at top, #141c29 0%, var(--bg) 60%);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+  }
+  .wrap {
+    width: min(560px, 94vw);
+    padding: 28px 28px 22px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 24px;
+    box-shadow: 0 30px 80px rgba(0,0,0,.45);
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .brand { font-weight: 800; letter-spacing: 3px; font-size: 13px; }
+  .brand span { color: var(--teal); }
+  .model { color: var(--muted); font-size: 12px; letter-spacing: 1px; }
+
+  .chapter {
+    margin: 18px 0 4px;
+    min-height: 44px;
+    transition: opacity .3s;
+  }
+  .chapter .no {
+    font-size: 11px; letter-spacing: 2px; color: var(--teal);
+    text-transform: uppercase;
+  }
+  .chapter .line { font-size: 15px; margin-top: 4px; }
+
+  .time {
+    text-align: center;
+    font-size: clamp(52px, 13vw, 80px);
+    font-weight: 250;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 1px;
+    margin: 6px 0 2px;
+  }
+  .time .ms { color: var(--muted); }
+
+  .gauge { margin: 6px 0 4px; }
+  .gauge-head {
+    display: flex; justify-content: space-between;
+    font-size: 12px; color: var(--muted); margin-bottom: 6px;
+    font-variant-numeric: tabular-nums;
+  }
+  .gauge-head b { color: var(--text); font-weight: 600; }
+  .bar {
+    height: 8px; border-radius: 8px; background: #1c2431; overflow: hidden;
+  }
+  .bar i {
+    display: block; height: 100%; width: 0%;
+    border-radius: 8px;
+    background: linear-gradient(90deg, var(--teal), var(--amber) 70%, var(--red));
+    background-size: 560px 100%;
+  }
+
+  svg.scene { width: 100%; height: auto; display: block; margin: 8px 0 4px; }
+
+  .cycle {
+    display: flex; gap: 8px; justify-content: center; margin: 4px 0 16px;
+    font-size: 12px; color: var(--muted); align-items: center;
+  }
+  .chip {
+    border: 1px solid var(--line); background: transparent; color: var(--muted);
+    border-radius: 999px; padding: 5px 12px; font-size: 12px; cursor: pointer;
+  }
+  .chip.on { border-color: var(--teal); color: var(--teal); }
+
+  .buttons { display: flex; gap: 14px; }
+  .btn {
+    flex: 1; height: 56px; border: none; border-radius: 14px;
+    font-size: 17px; font-weight: 600; cursor: pointer;
+    transition: filter .15s, opacity .15s, transform .08s;
+  }
+  .btn:active:not(:disabled) { transform: scale(.98); }
+  .btn:hover:not(:disabled) { filter: brightness(1.15); }
+  .btn:disabled { opacity: .35; cursor: default; }
+  #lapBtn { background: #232b38; color: var(--text); }
+  #startBtn { background: var(--teal); color: #052a25; }
+  #startBtn.running { background: var(--red); color: #fff; }
+
+  .log {
+    list-style: none; margin: 18px 0 0; padding: 0;
+    max-height: 200px; overflow-y: auto;
+    font-variant-numeric: tabular-nums; font-size: 14px;
+  }
+  .log li {
+    display: grid; grid-template-columns: 90px 1fr auto;
+    gap: 8px; padding: 10px 4px; border-top: 1px solid var(--line);
+  }
+  .log .tag { font-size: 11px; letter-spacing: 1px; color: var(--muted); align-self: center; }
+  .log .tag.auto { color: var(--amber); }
+  .log .at { color: var(--muted); }
+  .log li.best .val { color: #4fc27a; }
+  .log li.worst .val { color: var(--red); }
+
+  footer {
+    margin-top: 16px; display: flex; justify-content: space-between;
+    font-size: 11px; color: var(--muted);
+  }
+  kbd {
+    padding: 1px 5px; border: 1px solid var(--line); border-radius: 4px;
+    font-family: inherit;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">FUTURE<span>WAY</span></div>
+    <div class="model">VENTING VALVE · M60</div>
+  </header>
+
+  <div class="chapter" id="chapter">
+    <div class="no" id="chNo">Chapter 1 · 고요</div>
+    <div class="line" id="chLine">팩은 평소처럼 숨을 고르고 있다.</div>
+  </div>
+
+  <div class="time" id="display">00:00<span class="ms">.00</span></div>
+
+  <div class="gauge">
+    <div class="gauge-head">
+      <span>팩 내압 <b id="pVal">0%</b></span>
+      <span>벤팅 <b id="ventCount">0</b>회 · 상태 <b id="state">밀봉</b></span>
+    </div>
+    <div class="bar"><i id="pBar"></i></div>
+  </div>
+
+  <svg class="scene" viewBox="0 0 400 290" aria-label="배터리 팩과 벤팅 밸브 단면">
+    <defs>
+      <radialGradient id="flame" cx="50%" cy="80%" r="60%">
+        <stop offset="0%" stop-color="#ffb347" stop-opacity=".9"/>
+        <stop offset="60%" stop-color="#ec5a47" stop-opacity=".35"/>
+        <stop offset="100%" stop-color="#ec5a47" stop-opacity="0"/>
+      </radialGradient>
+      <linearGradient id="alu" x1="0" x2="0" y1="0" y2="1">
+        <stop offset="0%" stop-color="#eef3f8"/>
+        <stop offset="100%" stop-color="#9aa6b5"/>
+      </linearGradient>
+    </defs>
+
+    <!-- 배터리 팩 -->
+    <rect x="30" y="24" width="340" height="166" rx="12" fill="#18202c" stroke="#33405280" stroke-width="2"/>
+    <g id="cells"></g>
+    <ellipse id="flameGlow" cx="200" cy="170" rx="90" ry="40" fill="url(#flame)" opacity="0"/>
+    <text x="44" y="44" fill="#8793a6" font-size="10" letter-spacing="1.5">BATTERY PACK · NCM</text>
+
+    <!-- 밸브 시트 -->
+    <rect x="174" y="186" width="52" height="8" fill="#0b0f16"/>
+    <!-- 플랩: 힌지 (176,190) 기준 회전 -->
+    <g id="flap">
+      <rect x="176" y="187" width="48" height="6" rx="2" fill="url(#alu)"/>
+    </g>
+    <circle cx="176" cy="190" r="3.5" fill="#5d6b7e"/>
+    <text id="angleLabel" x="232" y="214" fill="#2fb8a6" font-size="11" opacity="0">45°</text>
+
+    <!-- 가스 -->
+    <g id="gas"></g>
+
+    <!-- 지면 -->
+    <line x1="20" y1="270" x2="380" y2="270" stroke="#2a3443" stroke-dasharray="4 5"/>
+    <text x="24" y="284" fill="#5d6b7e" font-size="10" letter-spacing="1.5">GROUND · 배출 방향 ↓</text>
+    <text id="resealLabel" x="200" y="214" fill="#2fb8a6" font-size="11" text-anchor="middle" opacity="0">재밀봉 · ΔP 4 kPa</text>
+  </svg>
+
+  <div class="cycle">
+    <span>압력 사이클</span>
+    <button class="chip on" data-s="10">10초</button>
+    <button class="chip" data-s="30">30초</button>
+    <button class="chip" data-s="60">60초</button>
+  </div>
+
+  <div class="buttons">
+    <button class="btn" id="lapBtn" disabled>랩 · 벤팅</button>
+    <button class="btn" id="startBtn">시작</button>
+  </div>
+
+  <ul class="log" id="log"></ul>
+
+  <footer>
+    <span>One hinge. One direction.</span>
+    <span><kbd>Space</kbd> 시작/정지 <kbd>L</kbd> 랩 <kbd>R</kbd> 초기화</span>
+  </footer>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const display = $('display'), startBtn = $('startBtn'), lapBtn = $('lapBtn');
+const pBar = $('pBar'), pVal = $('pVal'), stateEl = $('state'), ventCountEl = $('ventCount');
+const chNo = $('chNo'), chLine = $('chLine'), logEl = $('log');
+const flap = $('flap'), gasG = $('gas'), flameGlow = $('flameGlow');
+const angleLabel = $('angleLabel'), resealLabel = $('resealLabel');
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const SVGNS = 'http://www.w3.org/2000/svg';
+
+// ---- 스탑워치 상태 ----
+let running = false, startTime = 0, elapsed = 0;
+let cycleMs = 10000, cycleBase = 0;   // 마지막 벤팅 시점(경과 시간 기준)
+let lastLapTotal = 0, laps = [], events = [], ventCount = 0;
+
+// ---- 밸브 애니메이션 상태 (실시간 기준) ----
+const T_OPEN = 220, T_VENT = 1300, T_CLOSE = 1700, T_DONE = 2600;
+let ventStart = -1;
+
+// 셀 생성
+const cells = [];
+for (let i = 0; i < 6; i++) {
+  const r = document.createElementNS(SVGNS, 'rect');
+  r.setAttribute('x', 50 + i * 52); r.setAttribute('y', 56);
+  r.setAttribute('width', 40); r.setAttribute('height', 112); r.setAttribute('rx', 5);
+  $('cells').appendChild(r); cells.push(r);
+}
+
+const now = () => running ? elapsed + (performance.now() - startTime) : elapsed;
+const pad = n => String(n).padStart(2, '0');
+function fmt(ms) {
+  const cs = Math.floor(ms / 10) % 100, s = Math.floor(ms / 1000) % 60;
+  const m = Math.floor(ms / 60000) % 60, h = Math.floor(ms / 3600000);
+  return { main: (h ? h + ':' : '') + pad(m) + ':' + pad(s), cs: '.' + pad(cs) };
+}
+const fmtStr = ms => { const f = fmt(ms); return f.main + f.cs; };
+
+function lerpColor(a, b, t) {
+  const pa = a.match(/\w\w/g).map(h => parseInt(h, 16));
+  const pb = b.match(/\w\w/g).map(h => parseInt(h, 16));
+  return 'rgb(' + pa.map((v, i) => Math.round(v + (pb[i] - v) * t)).join(',') + ')';
+}
+function cellColor(p) {
+  return p < .6 ? lerpColor('1f6f68', 'b7822f', p / .6) : lerpColor('b7822f', 'c8412f', (p - .6) / .4);
+}
+
+function triggerVent(kind, at) {
+  ventStart = performance.now();
+  cycleBase = at;
+  ventCount++;
+  ventCountEl.textContent = ventCount;
+  events.push({ kind, at });
+}
+
+// ---- 가스 파티클 ----
+const parts = [];
+function spawnGas() {
+  if (reduced || parts.length > 140) return;
+  for (let k = 0; k < 3; k++) {
+    const c = document.createElementNS(SVGNS, 'circle');
+    gasG.appendChild(c);
+    parts.push({
+      el: c, x: 205 + Math.random() * 14, y: 200,
+      vx: (Math.random() - .3) * .9, vy: 1.6 + Math.random() * 1.4,
+      r: 2 + Math.random() * 2, life: 0
+    });
+  }
+}
+function stepGas() {
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i];
+    p.life++; p.x += p.vx; p.y += p.vy; p.r += .12;
+    if (p.y > 266) { p.vy *= .3; p.vx *= 1.04; p.vx += (p.x > 200 ? .12 : -.12); p.y = 266; }
+    const op = Math.max(0, .55 - p.life / 110);
+    p.el.setAttribute('cx', p.x); p.el.setAttribute('cy', p.y);
+    p.el.setAttribute('r', p.r); p.el.setAttribute('fill', `rgba(205,215,228,${op})`);
+    if (op <= 0) { p.el.remove(); parts.splice(i, 1); }
+  }
+}
+
+const easeOut = t => 1 - Math.pow(1 - t, 3);
+const easeInOut = t => t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+
+function setChapter(no, line) {
+  if (chNo.textContent !== no) { chNo.textContent = no; chLine.textContent = line; }
+}
+
+// ---- 메인 루프 ----
+function frame() {
+  const t = now();
+
+  // 자동 벤팅: 압력 사이클 완료
+  if (running && t - cycleBase >= cycleMs && ventStart < 0) {
+    triggerVent('auto', cycleBase + cycleMs);
+    renderLog();
+  }
+
+  let p = Math.min(1, (t - cycleBase) / cycleMs);
+  let angle = 0, phase = 'sealed';
+
+  if (ventStart >= 0) {
+    const dt = performance.now() - ventStart;
+    const pAtVent = 1;
+    if (dt < T_OPEN) { phase = 'opening'; angle = 45 * easeOut(dt / T_OPEN); p = pAtVent; }
+    else if (dt < T_VENT) { phase = 'venting'; angle = 45; p = pAtVent * (1 - (dt - T_OPEN) / (T_VENT - T_OPEN)); spawnGas(); }
+    else if (dt < T_CLOSE) { phase = 'closing'; angle = 45 * (1 - easeInOut((dt - T_VENT) / (T_CLOSE - T_VENT))); p = 0; }
+    else if (dt < T_DONE) { phase = 'resealed'; p = Math.min(p, .02); }
+    else { ventStart = -1; }
+  }
+
+  // 시간 표시
+  const f = fmt(t);
+  display.innerHTML = f.main + '<span class="ms">' + f.cs + '</span>';
+
+  // 게이지
+  const pct = Math.round(p * 100);
+  pBar.style.width = pct + '%';
+  pVal.textContent = pct + '%';
+
+  // 셀 색 & 화염
+  const col = cellColor(p);
+  cells.forEach(c => c.setAttribute('fill', col));
+  flameGlow.setAttribute('opacity', phase === 'opening' || phase === 'venting' ? .9 : p * .35);
+
+  // 플랩
+  flap.setAttribute('transform', `rotate(${angle} 176 190)`);
+  angleLabel.setAttribute('opacity', angle > 40 ? 1 : 0);
+  resealLabel.setAttribute('opacity', phase === 'resealed' ? 1 : 0);
+
+  // 상태 & 챕터
+  if (phase === 'opening' || phase === 'venting') {
+    stateEl.textContent = '개방'; stateEl.style.color = 'var(--amber)';
+    setChapter('Chapter 4 · 방출', '45°, 한 방향으로. 가스는 아래로, 화염은 안에.');
+  } else if (phase === 'closing' || phase === 'resealed') {
+    stateEl.textContent = '재밀봉'; stateEl.style.color = 'var(--teal)';
+    setChapter('Chapter 5 · 재밀봉', '벤팅은 충분조건이 아니다. 재밀봉이 완성한다.');
+  } else {
+    stateEl.textContent = '밀봉'; stateEl.style.color = '';
+    if (!running && t === 0) setChapter('Chapter 1 · 고요', '팩은 평소처럼 숨을 고르고 있다.');
+    else if (p < .45) setChapter('Chapter 1 · 고요', '팩은 평소처럼 숨을 고르고 있다.');
+    else if (p < .8) setChapter('Chapter 2 · 상승', '셀 사이로 압력이 차오른다.');
+    else setChapter('Chapter 3 · 임계', '이제, 밸브가 결정할 시간.');
+  }
+
+  stepGas();
+  requestAnimationFrame(frame);
+}
+
+// ---- 로그 ----
+function renderLog() {
+  let minI = -1, maxI = -1;
+  if (laps.length >= 2) {
+    const ds = laps.map(l => l.d);
+    minI = ds.indexOf(Math.min(...ds));
+    maxI = ds.indexOf(Math.max(...ds));
+  }
+  logEl.innerHTML = events.map((e, i) => {
+    if (e.kind === 'lap') {
+      const li = laps.findIndex(l => l.ev === i);
+      const cls = li === minI ? 'best' : li === maxI ? 'worst' : '';
+      return `<li class="${cls}"><span class="tag">LAP ${li + 1}</span><span class="val">${fmtStr(laps[li].d)}</span><span class="at">${fmtStr(e.at)}</span></li>`;
+    }
+    return `<li><span class="tag auto">AUTO VENT</span><span class="val">압력 사이클 완료</span><span class="at">${fmtStr(e.at)}</span></li>`;
+  }).reverse().join('');
+}
+
+// ---- 조작 ----
+function toggle() {
+  if (running) { elapsed = now(); running = false; }
+  else { startTime = performance.now(); running = true; }
+  updateButtons();
+}
+function lapOrReset() { running ? addLap() : reset(); }
+function addLap() {
+  if (!running) return;
+  const t = now();
+  laps.push({ d: t - lastLapTotal, ev: events.length });
+  lastLapTotal = t;
+  triggerVent('lap', t);
+  renderLog();
+}
+function reset() {
+  if (running) return;
+  elapsed = 0; cycleBase = 0; lastLapTotal = 0;
+  laps = []; events = []; ventCount = 0; ventStart = -1;
+  ventCountEl.textContent = 0;
+  renderLog(); updateButtons();
+}
+function updateButtons() {
+  startBtn.textContent = running ? '정지' : (elapsed > 0 ? '계속' : '시작');
+  startBtn.classList.toggle('running', running);
+  lapBtn.textContent = running || elapsed === 0 ? '랩 · 벤팅' : '초기화';
+  lapBtn.disabled = !running && elapsed === 0;
+}
+
+startBtn.addEventListener('click', toggle);
+lapBtn.addEventListener('click', lapOrReset);
+document.querySelectorAll('.chip').forEach(ch => ch.addEventListener('click', () => {
+  document.querySelectorAll('.chip').forEach(c => c.classList.remove('on'));
+  ch.classList.add('on');
+  cycleMs = +ch.dataset.s * 1000;
+  cycleBase = now();
+}));
+document.addEventListener('keydown', e => {
+  if (e.repeat) return;
+  if (e.code === 'Space') { e.preventDefault(); toggle(); }
+  else if (e.key === 'l' || e.key === 'L') addLap();
+  else if (e.key === 'r' || e.key === 'R') reset();
+});
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

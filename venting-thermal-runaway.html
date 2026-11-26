@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Thermal Runaway · Venting Valve</title>
+<style>
+  html,body{margin:0;height:100%;background:#05070b;overflow:hidden;font-family:-apple-system,"Segoe UI","Malgun Gothic",sans-serif}
+  canvas{display:block}
+  .ctl{position:fixed;right:18px;bottom:18px;display:flex;gap:8px}
+  .ctl button{background:rgba(20,26,36,.8);color:#e8edf3;border:1px solid #2a3442;border-radius:10px;padding:9px 14px;font-size:13px;cursor:pointer}
+  .ctl button:hover{border-color:#2fb8a6}
+  #rec.on{border-color:#ec5a47;color:#ec5a47}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div class="ctl">
+  <button id="play">❚❚ 일시정지</button>
+  <button id="restart">↺ 처음부터</button>
+  <button id="rec">● 동영상 저장</button>
+</div>
+<script>
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+let W,H,DPR,S,OX,OY;
+function resize(){DPR=Math.min(2,devicePixelRatio||1);W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR;cv.style.width=W+'px';cv.style.height=H+'px';S=Math.min(W/1200,H/800);OX=(W-1200*S)/2;OY=(H-800*S)/2+20*S;}
+addEventListener('resize',resize);resize();
+
+const L=15, GROUND=700, HX=540, HY=520, FLAP=120;
+const rnd=(a,b)=>a+Math.random()*(b-a), clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const ease=t=>t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+
+function sprite(stops){const c=document.createElement('canvas');c.width=c.height=128;const g=c.getContext('2d'),gr=g.createRadialGradient(64,64,0,64,64,64);stops.forEach(s=>gr.addColorStop(s[0],s[1]));g.fillStyle=gr;g.fillRect(0,0,128,128);return c;}
+const SP={
+ core:sprite([[0,'rgba(255,255,235,1)'],[.3,'rgba(255,225,140,.85)'],[1,'rgba(255,150,40,0)']]),
+ orange:sprite([[0,'rgba(255,180,70,.9)'],[.45,'rgba(255,110,25,.5)'],[1,'rgba(200,40,10,0)']]),
+ red:sprite([[0,'rgba(220,60,25,.7)'],[.5,'rgba(140,25,10,.3)'],[1,'rgba(50,8,4,0)']]),
+ smoke:sprite([[0,'rgba(150,155,165,.5)'],[.6,'rgba(105,110,120,.22)'],[1,'rgba(70,75,85,0)']]),
+ glow:sprite([[0,'rgba(255,140,40,.6)'],[.5,'rgba(255,80,20,.18)'],[1,'rgba(255,60,10,0)']])
+};
+
+// ---- 타임라인 ----
+function angleAt(t){let a=0;if(t>=6.5&&t<9.5){const u=(t-6.5)/3;a=45*ease(u)+Math.sin(t*70)*0.8*(1-u);}else if(t>=9.5&&t<12)a=45;else if(t>=12&&t<13.2)a=45*(1-ease((t-12)/1.2));return Math.max(0,a);}
+function pressureAt(t){if(t<2.5)return .08;if(t<6.5){const u=(t-2.5)/4;return .08+.92*u*u;}if(t<9.5)return 1-.2*(t-6.5)/3;if(t<12)return .8*(1-(t-9.5)/2.5)+.05;if(t<13.2)return .05*(1-(t-12)/1.2);return 0;}
+function intensity(t,a){let k=a/45;if(t>9.5&&t<10.3)k*=1.5;if(t>11)k*=Math.max(.25,1-(t-11)/1.3);return k;}
+function heat(i,t){const d=Math.abs(i-3);return clamp((t-2.5-d*.55)/2.2,0,1)*(t>13.2?clamp(1-(t-13.2)/4,.35,1):1);}
+const PH=[
+ [0,'STANDBY','정상 운전','팩은 고요하다.'],
+ [2.5,'THERMAL RUNAWAY','열폭주 발생','셀 하나가 무너지고, 열이 옆으로 번진다.'],
+ [6.5,'VENTING','밸브가 서서히 열린다','45° 힌지 — 한 방향으로, 아래로.'],
+ [9.5,'FULL VENT','최대 배출','불꽃과 가스가 지면을 향해 쏟아진다.'],
+ [12,'RESEAL','자동 재밀봉','ΔP 4 kPa — 다시 닫힌다.'],
+ [13.2,'SEALED','산소 차단','벤팅은 충분조건이 아니다. 재밀봉이 완성한다.']];
+const phaseAt=t=>PH.filter(p=>t>=p[0]).pop();
+
+// ---- 파티클 ----
+let flames=[],smoke=[],sparks=[],inner=[],flash=0,opened=false;
+function emit(t,a,dt){
+ const k=intensity(t,a);if(k<=0)return;
+ const r=a*Math.PI/180,ex=HX+FLAP*Math.cos(r),ey=HY+FLAP*Math.sin(r);
+ const n=(m)=>Math.floor(m*k*dt+Math.random());
+ for(let i=n(320);i--;){const u=Math.random(),x=ex+(662-ex)*u,y=ey+(522-ey)*u;flames.push({x,y,vx:rnd(60,260)*(.6+k),vy:rnd(450,900)*(.5+k*.6),s:rnd(18,40)*(.6+k*.6),age:0,life:rnd(.45,.9)});}
+ for(let i=n(90);i--;)smoke.push({x:rnd(ex,662),y:rnd(ey,525),vx:rnd(40,220),vy:rnd(250,480),s:rnd(30,60),age:0,life:rnd(2.2,4)});
+ for(let i=n(180);i--;){const s=rnd(600,1300);const th=rnd(.9,1.9);sparks.push({x:rnd(ex,662),y:rnd(ey,525),vx:Math.cos(th)*s*.6+rnd(-150,250),vy:Math.sin(th)*s,age:0,life:rnd(.5,1.4)});}
+}
+function emitInner(t,dt){const h=heat(3,t);if(h<=0||t>14)return;for(let i=Math.floor(60*h*dt+Math.random());i--;)inner.push({x:rnd(300,520)+(i%2?140:0),y:rnd(380,500),vx:rnd(-30,30),vy:rnd(-160,-60),s:rnd(14,34),age:0,life:rnd(.5,1)});}
+function upd(arr,dt,f){for(let i=arr.length-1;i>=0;i--){const p=arr[i];p.age+=dt/p.life;if(p.age>=1){arr.splice(i,1);continue;}f(p);}}
+function step(dt){
+ upd(flames,dt,p=>{p.vx+=rnd(-500,500)*dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.s+=60*dt;if(p.y>GROUND){p.y=GROUND;p.vx+=(p.vy*.6)*(Math.random()<.35?-1:1);p.vy*=-.15;}p.vx*=Math.pow(.4,dt);});
+ upd(smoke,dt,p=>{p.x+=p.vx*dt;p.y+=p.vy*dt;p.s+=70*dt;if(p.y>GROUND-20){p.y=GROUND-20;p.vx+=(Math.random()<.4?-1:1)*p.vy*.5;p.vy=-p.vy*.1;}p.vy-=60*dt;p.vx*=Math.pow(.5,dt);p.vy*=Math.pow(.6,dt);});
+ upd(sparks,dt,p=>{p.vy+=1100*dt;p.x+=p.vx*dt;p.y+=p.vy*dt;if(p.y>GROUND){p.y=GROUND;p.vy*=-.35;p.vx*=.7;}});
+ upd(inner,dt,p=>{p.x+=p.vx*dt;p.y+=p.vy*dt;p.s+=20*dt;});
+}
+
+// ---- 그리기 ----
+function rr(x,y,w,h,r){ctx.beginPath();ctx.roundRect?ctx.roundRect(x,y,w,h,r):ctx.rect(x,y,w,h);}
+function mix(a,b,t){return a.map((v,i)=>Math.round(v+(b[i]-v)*t));}
+function cellCol(h){const c=h<.5?mix([31,111,104],[214,128,40],h*2):mix([214,128,40],[255,235,200],(h-.5)*2);return`rgb(${c})`;}
+function draw(t){
+ const a=angleAt(t),k=intensity(t,a),p=pressureAt(t);
+ const shake=(k*7+(t>4.5&&t<6.5?p*2:0))*(Math.random()-.5)*2;
+ ctx.setTransform(DPR,0,0,DPR,0,0);
+ const bg=ctx.createLinearGradient(0,0,0,H);bg.addColorStop(0,'#070a10');bg.addColorStop(1,'#0b0e14');ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+ ctx.setTransform(S*DPR,0,0,S*DPR,(OX+shake*S)*DPR,(OY+shake*.6*S)*DPR);
+
+ // 바닥
+ ctx.fillStyle='#0d1118';ctx.fillRect(-400,GROUND,2000,400);
+ ctx.strokeStyle='#1e2633';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-400,GROUND);ctx.lineTo(1600,GROUND);ctx.stroke();
+ // 주변광
+ ctx.globalCompositeOperation='lighter';
+ if(k>0){ctx.globalAlpha=Math.min(1,k);ctx.drawImage(SP.glow,600-520,GROUND-260,1040,520);ctx.drawImage(SP.glow,620-260,560-200,520,400);}
+ const hg=heat(3,t);if(hg>0){ctx.globalAlpha=hg*(.5+.2*Math.sin(t*9));ctx.drawImage(SP.glow,600-500,330-300,1000,600);}
+ ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';
+
+ // 팩 하우징
+ const hs=ctx.createLinearGradient(0,140,0,530);hs.addColorStop(0,'#2a3341');hs.addColorStop(1,'#151b25');
+ ctx.fillStyle=hs;rr(190,130,820,400,18);ctx.fill();ctx.strokeStyle='#3a475a';ctx.lineWidth=3;ctx.stroke();
+ ctx.save();rr(210,150,780,350,10);ctx.clip();ctx.fillStyle='#0c1017';ctx.fillRect(210,150,780,350);
+ // 셀
+ for(let i=0;i<8;i++){const h=heat(i,t),x=232+i*94;const g=ctx.createLinearGradient(x,0,x+76,0);g.addColorStop(0,cellCol(h*.85));g.addColorStop(.5,cellCol(h));g.addColorStop(1,cellCol(h*.8));ctx.fillStyle=g;rr(x,190,76,280,8);ctx.fill();ctx.fillStyle='#55606e';ctx.fillRect(x+26,178,24,12);}
+ ctx.strokeStyle='#6b7787';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(240,178);ctx.lineTo(960,178);ctx.stroke();
+ // 내부 화염
+ ctx.globalCompositeOperation='lighter';
+ for(const q of inner){ctx.globalAlpha=(1-q.age)*.8;const sp=q.age<.3?SP.core:q.age<.6?SP.orange:SP.red;ctx.drawImage(sp,q.x-q.s,q.y-q.s,q.s*2,q.s*2);}
+ ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';ctx.restore();
+ ctx.fillStyle='#8793a6';ctx.font='600 15px sans-serif';ctx.fillText('BATTERY PACK · NCM',214,122);
+
+ // 연기 (뒤)
+ for(const q of smoke){ctx.globalAlpha=(1-q.age)*.75;ctx.drawImage(SP.smoke,q.x-q.s,q.y-q.s,q.s*2,q.s*2);}
+ ctx.globalAlpha=1;
+
+ // 밸브 시트 + 플랩
+ ctx.fillStyle='#05070b';ctx.fillRect(536,514,128,14);
+ ctx.save();ctx.translate(HX,HY);ctx.rotate(a*Math.PI/180);
+ const fg=ctx.createLinearGradient(0,-6,0,8);fg.addColorStop(0,'#f2f6fa');fg.addColorStop(1,'#8e9aab');ctx.fillStyle=fg;rr(0,-5,FLAP,12,3);ctx.fill();
+ if(k>0){ctx.fillStyle=`rgba(255,140,40,${k*.6})`;rr(0,-5,FLAP,12,3);ctx.fill();}
+ ctx.restore();ctx.fillStyle='#4b5767';ctx.beginPath();ctx.arc(HX,HY,8,0,7);ctx.fill();
+ if(a>3){ctx.fillStyle='#2fb8a6';ctx.font='700 18px sans-serif';ctx.fillText(Math.round(a)+'°',HX-60,HY+40);}
+
+ // 화염 & 불꽃
+ ctx.globalCompositeOperation='lighter';
+ for(const q of flames){ctx.globalAlpha=Math.pow(1-q.age,1.2);const sp=q.age<.22?SP.core:q.age<.55?SP.orange:SP.red;ctx.drawImage(sp,q.x-q.s,q.y-q.s,q.s*2,q.s*2);}
+ ctx.globalAlpha=1;ctx.lineCap='round';
+ for(const q of sparks){const l=1-q.age;ctx.strokeStyle=`rgba(255,${200+55*l|0},${120*l|0},${l})`;ctx.lineWidth=2.2;ctx.beginPath();ctx.moveTo(q.x-q.vx*.018,q.y-q.vy*.018);ctx.lineTo(q.x,q.y);ctx.stroke();}
+ ctx.globalCompositeOperation='source-over';
+
+ // ---- HUD (화면 좌표) ----
+ ctx.setTransform(DPR,0,0,DPR,0,0);
+ if(flash>0){ctx.fillStyle=`rgba(255,220,170,${flash})`;ctx.fillRect(0,0,W,H);}
+ const vg=ctx.createRadialGradient(W/2,H/2,Math.min(W,H)*.35,W/2,H/2,Math.max(W,H)*.75);vg.addColorStop(0,'rgba(0,0,0,0)');vg.addColorStop(1,'rgba(0,0,0,.65)');ctx.fillStyle=vg;ctx.fillRect(0,0,W,H);
+ const u=Math.max(.6,Math.min(W,H)/800);
+ ctx.fillStyle='#eef2f7';ctx.font=`800 ${15*u}px sans-serif`;ctx.fillText('FUTURE',28*u,40*u);const fw=ctx.measureText('FUTURE').width;ctx.fillStyle='#2fb8a6';ctx.fillText('WAY',28*u+fw,40*u);
+ ctx.fillStyle='#8793a6';ctx.font=`500 ${12*u}px sans-serif`;ctx.fillText('VENTING VALVE · M60  |  THERMAL RUNAWAY SIMULATION',28*u,60*u);
+ const ph=phaseAt(t);
+ ctx.textAlign='center';
+ const ss=Math.floor(t),cs=Math.floor((t%1)*100);
+ ctx.fillStyle='#eef2f7';ctx.font=`200 ${54*u}px sans-serif`;ctx.fillText(`T+ 00:${String(ss).padStart(2,'0')}.${String(cs).padStart(2,'0')}`,W/2,68*u);
+ ctx.fillStyle=k>0?'#f2a33a':t>=12?'#2fb8a6':t>=2.5?'#ec5a47':'#2fb8a6';ctx.font=`700 ${13*u}px sans-serif`;ctx.fillText(ph[1]+'  ·  '+ph[2],W/2,96*u);
+ ctx.fillStyle='#c9d1dc';ctx.font=`400 ${15*u}px sans-serif`;ctx.fillText(ph[3],W/2,120*u);
+ ctx.textAlign='left';
+ // 하단 게이지
+ const bx=28*u,by=H-46*u,bw=Math.min(360*u,W*.4);
+ ctx.fillStyle='#8793a6';ctx.font=`500 ${12*u}px sans-serif`;ctx.fillText(`팩 내압 ${Math.round(p*100)}%   밸브 ${Math.round(a)}°`,bx,by-10*u);
+ ctx.fillStyle='#1c2431';rr(bx,by,bw,8*u,4*u);ctx.fill();
+ const pg=ctx.createLinearGradient(bx,0,bx+bw,0);pg.addColorStop(0,'#2fb8a6');pg.addColorStop(.7,'#f2a33a');pg.addColorStop(1,'#ec5a47');ctx.fillStyle=pg;rr(bx,by,bw*p,8*u,4*u);ctx.fill();
+ // 진행바
+ ctx.fillStyle='#1c2431';ctx.fillRect(0,H-3*u,W,3*u);ctx.fillStyle='#2fb8a6';ctx.fillRect(0,H-3*u,W*t/L,3*u);
+ if(rec){ctx.fillStyle='#ec5a47';ctx.beginPath();ctx.arc(W-40*u,36*u,6*u,0,7);ctx.fill();ctx.font=`700 ${12*u}px sans-serif`;ctx.fillText('REC',W-80*u,40*u);}
+}
+
+// ---- 루프 ----
+let t=0,playing=true,last=performance.now(),rec=null;
+function restart(){t=0;flames=[];smoke=[];sparks=[];inner=[];flash=0;opened=false;}
+function loop(n){
+ const dt=Math.min(.05,(n-last)/1000);last=n;
+ if(playing){
+  t+=dt;
+  if(t>=L){if(rec)rec.stop();restart();}
+  const a=angleAt(t);
+  if(a>2&&!opened){opened=true;flash=.45;}
+  flash=Math.max(0,flash-dt*1.5);
+  emit(t,a,dt);emitInner(t,dt);step(dt);
+ }
+ draw(t);requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+const playBtn=document.getElementById('play'),recBtn=document.getElementById('rec');
+function togglePlay(){playing=!playing;playBtn.textContent=playing?'❚❚ 일시정지':'▶ 재생';}
+playBtn.onclick=togglePlay;
+document.getElementById('restart').onclick=restart;
+addEventListener('keydown',e=>{if(e.code==='Space'){e.preventDefault();togglePlay();}});
+recBtn.onclick=()=>{
+ if(rec)return;
+ const mime=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'].find(m=>MediaRecorder.isTypeSupported(m));
+ rec=new MediaRecorder(cv.captureStream(60),{mimeType:mime,videoBitsPerSecond:12e6});
+ const chunks=[];rec.ondataavailable=e=>e.data.size&&chunks.push(e.data);
+ rec.onstop=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(chunks,{type:'video/webm'}));a.download='futureway-venting.webm';a.click();rec=null;recBtn.classList.remove('on');recBtn.textContent='● 동영상 저장';};
+ restart();if(!playing)togglePlay();rec.start();recBtn.classList.add('on');recBtn.textContent='녹화 중… (15초)';
+};
+</script>
+</body>
+</html>
